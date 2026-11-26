@@ -1,199 +1,321 @@
-# GoSeq — GO Enrichment Analysis Pipeline
-
-A lightweight R pipeline for **Gene Ontology (GO) enrichment analysis** of differentially expressed genes (DEGs), built around the Bioconductor [`goseq`](https://bioconductor.org/packages/release/bioc/html/goseq.html) package. The pipeline corrects for gene-length bias, runs enrichment tests across all input files in batch, and produces both an annotated Excel results file and a publication-ready bubble plot for each comparison.
-
----
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Project Structure](#project-structure)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Input File Format](#input-file-format)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [Output](#output)
-- [Supported Organisms](#supported-organisms)
-- [Notes](#notes)
-
----
+# GOseq GO enrichment analysis for *Escherichia coli*
 
 ## Overview
 
-The core workflow for each input file:
+This repository performs Gene Ontology (GO) enrichment analysis using the
+Bioconductor [`goseq`](https://bioconductor.org/packages/release/bioc/html/goseq.html)
+package. GOseq accounts for gene-length bias in RNA-seq differential-expression
+analyses.
 
-1. Reads a DEG list (gene IDs + binary expression flag).
-2. Constructs a probability weighting function (PWF) via `nullp()`, correcting for gene-length bias.
-3. Runs `goseq()` to compute over- and under-representation p-values for all GO terms.
-4. Annotates results with the specific DEGs driving each enriched category.
-5. Saves an Excel results file and a bubble plot (top 20 Biological Process terms, sorted by p-value).
+The pipeline processes every supported file in the `input/` directory and
+produces:
 
----
+- a complete Excel workbook containing GOseq results;
+- Benjamini–Hochberg-adjusted P values;
+- a separate worksheet containing significantly overrepresented GO terms;
+- a Biological Process bubble plot containing up to the 20 most significant
+  terms.
 
-## Project Structure
+## Important: definition of the tested gene set
 
-```
+`Main script.r` does not calculate differential expression, determine
+regulation direction, or require a `log2FC` column.
+
+Each input file defines its tested gene set through the `Expression` column:
+
+- `Expression = TRUE` indicates that the gene belongs to the gene set being
+  tested;
+- `Expression = FALSE` indicates that the gene belongs to the background gene
+  universe but not to the tested set.
+
+Combined, upregulated, and downregulated enrichment analyses can be performed
+by providing separate input files in which the `Expression` column has already
+been defined appropriately during the preceding differential-expression
+analysis.
+
+## Repository structure
+
+```text
 GoSeq/
-├── Main script.r                  # Main analysis script
-│
-├── input/                         # DEG input files (tab-delimited or .xlsx)
-│   └── expression_*.tab
-│
-├── output/                        # Generated automatically on first run
-│   ├── *_GO_results.xlsx          # Enrichment results with DEG annotation
-│   └── *_GO_bubble_plot.pdf       # Bubble plot (top 20 BP terms)
-│
-├── Go_annotations/                # GO term annotation files (per organism)
-│   ├── ArabidopsisGeneID_GO.xlsx
-│   ├── E_coliGeneID_GO.xlsx
-│   ├── E_coliGeneID_GO_locusbased.xlsx
-│   └── ITAG3.0_GeneID_GO.xlsx
-│
-└── Length/                        # Gene length files (per organism)
-    ├── GeneID_length.xlsx
-    ├── GeneID_Length_1.xlsx
-    ├── GeneID_Length_Arabidopsis.xlsx
-    ├── GeneID_Length_e_coli_locus.xlsx
-    └── ITAG3.0_GeneID_Length.xlsx
+├── Main script.r
+├── input/
+│   └── one or more .tab, .tabular, or .xlsx input files
+├── Go_annotations/
+│   └── E_coliGeneID_GO.xlsx
+├── Length/
+│   └── GeneID_length.xlsx
+└── output_BH_p_adjusted/
 ```
 
----
+Example input files may represent:
+
+```text
+expression_15min_combined.tab
+expression_15min_upregulated.tab
+expression_15min_downregulated.tab
+expression_30min_combined.tab
+expression_30min_upregulated.tab
+expression_30min_downregulated.tab
+```
+
+The upregulated and downregulated input files are optional. They must be
+prepared before running this pipeline.
+
+File and directory names are case-sensitive on Linux. In particular, the
+required gene-length file is:
+
+```text
+Length/GeneID_length.xlsx
+```
 
 ## Requirements
 
-- R ≥ 4.0
-- Bioconductor ≥ 3.12
+The analysis requires R and the following packages:
 
-### R packages
+- `goseq`
+- `readxl`
+- `ggplot2`
+- `dplyr`
+- `writexl`
 
-| Package | Source |
-|---|---|
-| `goseq` | Bioconductor |
-| `ggplot2` | CRAN |
-| `readxl` | CRAN |
-| `dplyr` | CRAN |
-| `tidyr` | CRAN |
-| `writexl` | CRAN |
-| `BiocManager` | CRAN |
-
----
-
-## Installation
-
-All required packages are installed automatically when the script is first run. To install them manually:
+Install the CRAN packages with:
 
 ```r
-install.packages(c("ggplot2", "readxl", "dplyr", "tidyr", "writexl", "BiocManager"))
+install.packages(c("readxl", "ggplot2", "dplyr", "writexl"))
+```
+
+Install GOseq through Bioconductor:
+
+```r
+if (!requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
 BiocManager::install("goseq")
 ```
 
----
+The script checks whether the required packages are available and stops with
+an informative message if any package is missing.
 
-## Input File Format
+## Input files
 
-Input files go in the `input/` folder. Accepted formats: `.tab`, `.tabular`, or `.xlsx`.
+The script processes every `.tab`, `.tabular`, or `.xlsx` file placed in the
+`input/` directory.
 
-The file must contain at least two columns:
+Each input file must contain the following columns:
 
 | Column | Description |
 |---|---|
-| `GeneID` | Gene identifier matching those in the annotation and length files |
-| `Expression` | Binary flag: `TRUE` (or `1`) = differentially expressed, `FALSE` (or `0`) = not |
+| `GeneID` | Gene identifier matching the GO annotation and gene-length files |
+| `Expression` | Logical indicator specifying whether the gene belongs to the tested gene set |
 
-**Example** (`expression_15minTOXIN vs 15minCONTROL_...tab`):
+Example:
 
-```
+```text
 GeneID    Expression
-b0001     TRUE
-b0002     FALSE
-b0003     TRUE
-...
+b0001     FALSE
+b0002     TRUE
+b0003     FALSE
 ```
 
-The pipeline processes **all** files in `input/` matching the pattern in one run.
+The complete tested-gene universe should be retained in every input file.
+Genes belonging to the tested gene set should have `Expression = TRUE`; all
+other genes in the background universe should have `Expression = FALSE`.
 
----
+Alternative column names accepted by the script include:
+
+- `gene_id` for the gene identifier;
+- `DE` or `is_DE` for the gene-set indicator.
+
+### Combined analysis
+
+For a combined DEG analysis:
+
+- `Expression = TRUE` for all selected differentially expressed genes;
+- `Expression = FALSE` for all other genes in the tested background.
+
+### Upregulated analysis
+
+For an upregulated analysis:
+
+- `Expression = TRUE` only for selected upregulated DE genes;
+- `Expression = FALSE` for all other genes.
+
+### Downregulated analysis
+
+For a downregulated analysis:
+
+- `Expression = TRUE` only for selected downregulated DE genes;
+- `Expression = FALSE` for all other genes.
+
+The upregulated and downregulated classifications must be generated during the
+preceding differential-expression analysis. `Main script.r` does not use
+`log2FC` and does not assign regulation direction.
+
+## Statistical analysis
+
+GO enrichment is performed using the Bioconductor `goseq` package, with
+gene-length bias estimated using `nullp()`.
+
+For each input file, `goseq()` calculates over-representation and
+under-representation P values for the annotated GO terms.
+
+Benjamini–Hochberg multiple-testing correction is applied across all tested
+GO terms—Biological Process, Molecular Function, and Cellular Component
+combined—separately for each input file.
+
+Raw over- and under-representation P values are adjusted separately.
+
+GO terms are considered significantly overrepresented when:
+
+```text
+BH-adjusted P value ≤ 0.05
+```
+
+The adjusted values are reported as:
+
+- `over_represented_p_adjusted`;
+- `under_represented_p_adjusted`.
+
+The significance threshold is defined in `Main script.r`:
+
+```r
+PADJ_CUTOFF <- 0.05
+```
+
+## Bubble plots
+
+Bubble plots display Biological Process terms only.
+
+The plotting procedure:
+
+1. retains terms with `over_represented_p_adjusted <= 0.05`;
+2. ranks them by adjusted P value;
+3. displays up to the 20 most significant terms.
+
+If fewer than 20 Biological Process terms pass the significance threshold,
+all significant terms are displayed.
+
+Plot elements represent:
+
+- **X-axis:** percentage of genes in the GO category that belong to the tested
+  gene set;
+- **Y-axis:** GO identifier and term name;
+- **Bubble size:** number of selected genes assigned to the GO term;
+- **Bubble colour:** BH-adjusted over-representation P value (`P-adjusted`).
+
+If no Biological Process term passes the adjusted P-value threshold, the plot
+reports that no significant terms were identified.
 
 ## Configuration
 
-At the top of `Main script.r`, set the paths for your organism:
+By default, the pipeline uses:
 
 ```r
-setwd("path/to/GoSeq")                                 # working directory
-go_annotation_path <- "Go_annotations/E_coliGeneID_GO.xlsx"  # GO term annotations
-gene_length_path   <- "Length/GeneID_length.xlsx"             # gene lengths
-input_folder  <- "input"
-output_folder <- "output"
+go_annotation_path <- file.path(
+  base_folder,
+  "Go_annotations",
+  "E_coliGeneID_GO.xlsx"
+)
+
+gene_length_path <- file.path(
+  base_folder,
+  "Length",
+  "GeneID_length.xlsx"
+)
 ```
 
-Swap in the appropriate annotation and length files from `Go_annotations/` and `Length/` when analysing a different organism (see [Supported Organisms](#supported-organisms)).
+The script automatically creates the following output directory:
 
----
+```text
+output_BH_p_adjusted/
+```
 
-## Usage
+To analyse another organism, update the annotation and gene-length paths in
+`Main script.r` and provide compatible files.
 
-Open R or RStudio, then run:
+## Running the analysis
+
+From the repository root, run:
+
+```bash
+Rscript "Main script.r"
+```
+
+Alternatively, in R or RStudio, set the repository root as the working
+directory and run:
 
 ```r
 source("Main script.r")
 ```
 
-The script will:
-- Install any missing packages.
-- Iterate over every file in `input/`.
-- Print progress messages to the console.
-- Write results to `output/`.
+The script automatically processes every supported file in `input/`.
 
----
+## Output files
 
-## Output
+All results are written to:
 
-For each input file two outputs are generated in `output/`:
+```text
+output_BH_p_adjusted/
+```
 
-### 1. `*_GO_results.xlsx`
+For every input file, the pipeline produces:
 
-An Excel workbook with one row per GO category, containing:
+```text
+<input-name>_GOseq_BH_p_adjusted_results.xlsx
+<input-name>_GOseq_BH_p_adjusted_top20_significant_BP_bubble_plot.pdf
+```
+
+Each Excel workbook contains two worksheets:
+
+| Worksheet | Contents |
+|---|---|
+| `All_GO_terms` | All GO terms tested by GOseq, including raw and BH-adjusted P values |
+| `Significant_overrep` | Terms with BH-adjusted over-representation P values ≤ 0.05 |
+
+The output columns include:
 
 | Column | Description |
 |---|---|
-| `category` | GO term ID |
-| `over_represented_pvalue` | P-value for over-representation |
-| `under_represented_pvalue` | P-value for under-representation |
-| `numDEInCat` | Number of DEGs in this GO category |
-| `numInCat` | Total genes in this GO category |
+| `category` | GO term identifier |
+| `over_represented_pvalue` | Raw over-representation P value |
+| `under_represented_pvalue` | Raw under-representation P value |
+| `numDEInCat` | Number of selected genes assigned to the GO category |
+| `numInCat` | Total number of genes assigned to the GO category |
 | `term` | GO term description |
-| `ontology` | GO namespace (`BP`, `MF`, `CC`) |
-| `GeneID` | Comma-separated list of DEGs driving the category |
+| `ontology` | GO namespace: `BP`, `MF`, or `CC` |
+| `DE_GeneID` | Selected genes assigned to the GO category |
+| `over_represented_p_adjusted` | BH-adjusted over-representation P value |
+| `under_represented_p_adjusted` | BH-adjusted under-representation P value |
 
-### 2. `*_GO_bubble_plot.pdf`
+The Excel workbooks contain results for all three GO ontologies. The PDF
+bubble plots display significant Biological Process results only.
 
-A bubble plot of the **top 20 Biological Process (BP)** terms, sorted by p-value (ascending):
+## Reproducibility notes
 
-- **X-axis** — percentage of DEGs in the category
-- **Y-axis** — GO category label
-- **Bubble size** — count of DEGs in the category
-- **Bubble colour** — p-value (grey → dark red = low → high p-value)
+The analysis uses only files included in this repository. It does not require
+files from a volcano-plot directory or any other external analysis folder.
 
----
+For reproducible results:
 
-## Supported Organisms
+- retain the complete tested-gene universe in every input file;
+- define the tested gene set through the `Expression` column;
+- prepare upregulated and downregulated gene sets before running this pipeline;
+- use the supplied GO annotation and gene-length files;
+- preserve case-sensitive directory and filenames;
+- record the repository release or commit used for the analysis.
 
-The `Go_annotations/` and `Length/` folders include reference files for:
+## Version 1.1.0
 
-| Organism | Annotation file | Length file |
-|---|---|---|
-| *E. coli* (gene ID) | `E_coliGeneID_GO.xlsx` | `GeneID_length.xlsx` |
-| *E. coli* (locus tag) | `E_coliGeneID_GO_locusbased.xlsx` | `GeneID_Length_e_coli_locus.xlsx` |
-| *Arabidopsis thaliana* | `ArabidopsisGeneID_GO.xlsx` | `GeneID_Length_Arabidopsis.xlsx` |
-| Tomato (ITAG 3.0) | `ITAG3.0_GeneID_GO.xlsx` | `ITAG3.0_GeneID_Length.xlsx` |
+Version 1.1.0 adds:
 
-To add a new organism, provide an annotation file with columns `GeneID` and `GOTerm`, and a length file with columns `GeneID` and `Length`, then update the paths in the script.
+- Benjamini–Hochberg multiple-testing correction;
+- adjusted over- and under-representation P values;
+- an adjusted P-value significance threshold of 0.05;
+- processing of separately prepared combined, upregulated, or downregulated
+  gene-set input files;
+- Biological Process plots showing up to 20 significant terms;
+- updated Excel workbooks;
+- repository-relative file paths with no external analysis-folder dependency.
 
----
-
-## Notes
-
-- The bubble plot filters for **Biological Process (BP)** ontology only. To include Molecular Function or Cellular Component, adjust the `filter(ontology == "BP")` line in `generate_bubble_plot()`.
-- The `setwd()` path in the script is an absolute Windows path — update it to your local environment before running.
-- Output files are named after the input file (sans extension), so running the same file twice will **overwrite** previous results.
+This release supersedes `x1.0.1` for the corrected GO enrichment analyses.
