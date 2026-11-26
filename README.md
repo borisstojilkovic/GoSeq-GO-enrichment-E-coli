@@ -44,7 +44,7 @@ GoSeq/
 │   └── E_coliGeneID_GO.xlsx
 ├── Length/
 │   └── GeneID_length.xlsx
-└── output_BH_p_adjusted/
+└── output/
 ```
 
 Example input files may represent:
@@ -228,7 +228,7 @@ gene_length_path <- file.path(
 The script automatically creates the following output directory:
 
 ```text
-output_BH_p_adjusted/
+output/
 ```
 
 To analyse another organism, update the annotation and gene-length paths in
@@ -256,7 +256,7 @@ The script automatically processes every supported file in `input/`.
 All results are written to:
 
 ```text
-output_BH_p_adjusted/
+output/
 ```
 
 For every input file, the pipeline produces:
